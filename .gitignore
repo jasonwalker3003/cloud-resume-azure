@@ -1,0 +1,10 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+.venv/
+__pycache__/
+.pytest_cache/
+local.settings.json
+site/config.js
