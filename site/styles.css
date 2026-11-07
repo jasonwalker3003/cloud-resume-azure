@@ -1,0 +1,7 @@
+body { font-family: system-ui, sans-serif; max-width: 760px; margin: 0 auto; padding: 24px 16px; line-height: 1.6; color: #1b1f24; background: #fafaf7; }
+h1 { margin-bottom: 0; }
+.role { color: #5a6270; margin-top: 4px; }
+h2 { border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 32px; }
+footer { margin-top: 48px; font-size: 14px; color: #5a6270; }
+a { color: #1c5cc9; }
+.dates { font-weight: normal; color: #5a6270; font-size: 0.9em; margin-left: 8px; }
