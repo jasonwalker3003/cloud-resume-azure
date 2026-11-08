@@ -144,6 +144,11 @@ resource "azurerm_function_app_flex_consumption" "api" {
     }
   }
   tags = local.tags
+
+  lifecycle {
+    # Azure adds this tag to link the app to Application Insights in the portal.
+    ignore_changes = [tags["hidden-link: /app-insights-resource-id"]]
+  }
 }
 
 # Let the function's identity read and write Cosmos data (built-in Data Contributor role).
