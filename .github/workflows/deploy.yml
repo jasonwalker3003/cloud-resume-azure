@@ -1,0 +1,95 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # lets you run it by hand from the Actions tab
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency: deploy-production # never run two deploys at once
+
+env:
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_USE_OIDC: "true"
+  TF_VAR_prefix: ${{ vars.P1_PREFIX }}
+  TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    outputs:
+      func_name: ${{ steps.out.outputs.func_name }}
+      swa_name: ${{ steps.out.outputs.swa_name }}
+      api_base_url: ${{ steps.out.outputs.api_base_url }}
+      rg: ${{ steps.out.outputs.rg }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false # so `terraform output -raw` prints clean values
+      - run: terraform init -backend-config=backend.hcl -input=false
+      - run: terraform apply -auto-approve -input=false
+      - id: out
+        run: |
+          echo "func_name=$(terraform output -raw function_app_name)" >> "$GITHUB_OUTPUT"
+          echo "swa_name=$(terraform output -raw static_web_app_name)" >> "$GITHUB_OUTPUT"
+          echo "api_base_url=$(terraform output -raw api_base_url)" >> "$GITHUB_OUTPUT"
+          echo "rg=$(terraform output -raw resource_group_name)" >> "$GITHUB_OUTPUT"
+
+  api:
+    needs: infra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Unit tests (nothing deploys if these fail)
+        working-directory: api
+        run: |
+          pip install -r requirements.txt pytest
+          python -m pytest -q
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ needs.infra.outputs.func_name }}
+          package: api
+          sku: flexconsumption
+          remote-build: true # Azure installs requirements.txt on Linux for you
+
+  site:
+    needs: infra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Point the site at the API
+        run: echo "window.API_BASE = \"${{ needs.infra.outputs.api_base_url }}\";" > site/config.js
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Fetch the Static Web Apps deployment token
+        id: token
+        run: |
+          token=$(az staticwebapp secrets list -n "${{ needs.infra.outputs.swa_name }}" \
+            -g "${{ needs.infra.outputs.rg }}" --query properties.apiKey -o tsv)
+          echo "::add-mask::$token"
+          echo "value=$token" >> "$GITHUB_OUTPUT"
+      - uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.token.outputs.value }}
+          action: upload
+          app_location: site
+          skip_app_build: true

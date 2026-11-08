@@ -1,0 +1,43 @@
+name: CI
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write # lets the job request an OIDC token to sign in to Azure
+  contents: read
+
+env:
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_USE_OIDC: "true"
+  TF_VAR_prefix: ${{ vars.P1_PREFIX }}
+  TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+
+jobs:
+  test-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  plan-infra:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend-config=backend.hcl -input=false
+      - run: terraform validate
+      - run: terraform plan -input=false
